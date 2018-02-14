@@ -11,3 +11,9 @@ activate a virtual environment for the project:
 
 install the Ipython kernel:
 `pip install ipykernel`
+
+Run the kernel "self-install" script:
+`python -m ipykernel install --user --name=my-virtualenv-name`
+
+Finally, activate the jupyter notebook server:
+`jupyter notebook`
