@@ -2,7 +2,11 @@
 
 You can find more informationon on the dataset itself here: https://www.kaggle.com/c/jigsaw-toxic-comment-classification-challenge/data
 
-### Ipython Notebook setup
+### Basic setup:
+
+Save the datasets from the link above to the `data` folder and unzip them.
+
+### Ipython Notebook setup:
 
 #### Using virtualenv (recommended):
 
