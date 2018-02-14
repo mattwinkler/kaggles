@@ -100,5 +100,7 @@ ENV/
 # mypy
 .mypy_cache/
 
-# datafiles
-data
+# temp directories
+tmp
+.csv
+.zip
