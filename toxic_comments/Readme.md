@@ -17,3 +17,7 @@ Run the kernel "self-install" script:
 
 Finally, activate the jupyter notebook server:
 `jupyter notebook`
+
+#### Other setup:
+
+See here: http://jupyter.org/install
