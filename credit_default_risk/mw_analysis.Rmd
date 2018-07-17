@@ -1,0 +1,575 @@
+---
+title: "R Notebook"
+output: html_notebook
+author: "mwinkler"
+---
+
+
+```{r, include=FALSE, knitr=FALSE}
+### Load requirements:
+#if (!require("pacman")) install.packages("pacman")
+pacman::p_load(tidyverse, skimr, GGally, plotly, viridis, 
+               caret, DT, data.table)
+
+```
+
+
+### Load data:
+```{r}
+setwd('/Users/matt.winkler/Documents/repos/kaggle--home-credit-default-risk/src')
+
+train <-fread('../data/application_train.csv', stringsAsFactors = FALSE, showProgress=F,
+              data.table = F, na.strings=c("NA","NaN","?", ""))
+
+test <-fread('../data/application_test.csv', stringsAsFactors = FALSE, showProgress=F,
+             data.table = F, na.strings=c("NA","NaN","?", ""))
+
+bureau <-fread('../data/bureau.csv', stringsAsFactors = FALSE, showProgress=F,
+               data.table = F, na.strings=c("NA","NaN","?", ""))
+
+prev <-fread('../data/previous_application.csv', stringsAsFactors = FALSE, showProgress=F,
+             data.table = F, na.strings=c("NA","NaN","?", "")) 
+
+```
+
+```{r}
+# store target and IDs
+SK_ID_CURR <- train$SK_ID_CURR
+y <- train$TARGET
+drops <- c("SK_ID_CURR", "TARGET")
+
+train.X <- train[ , !(names(train) %in% drops)]
+```
+
+```{r}
+# summarize train dataset:
+train.X %>% skim() %>% kable()
+```
+
+```{r}
+# mean of target:
+mean(train$TARGET)
+```
+
+At a high level, the dataset shows several columns that each have a high proportion of missing values, and a target variable that is unbalanced, though not severely. There are also numerous housing stock-related columns (.e.g COMMONAREA_AVG, COMMONAREA_MEDI, COMMONAREA_MODE) that seem to have a high potential for redundancy.  
+
+## Next steps:
+
+1) Check correlations in housing stock features
+2) Drop redundant features
+3) Impute missing numerics
+4) Impute missing categoricals
+
+#### Correlations in housing stock:
+```{r}
+house <- train.X[,c('APARTMENTS_AVG','BASEMENTAREA_AVG','YEARS_BEGINEXPLUATATION_AVG','YEARS_BUILD_AVG','COMMONAREA_AVG','ELEVATORS_AVG','ENTRANCES_AVG','FLOORSMAX_AVG','FLOORSMIN_AVG','LANDAREA_AVG','LIVINGAPARTMENTS_AVG','LIVINGAREA_AVG','NONLIVINGAPARTMENTS_AVG','NONLIVINGAREA_AVG','APARTMENTS_MODE','BASEMENTAREA_MODE','YEARS_BEGINEXPLUATATION_MODE','YEARS_BUILD_MODE','COMMONAREA_MODE','ELEVATORS_MODE','ENTRANCES_MODE','FLOORSMAX_MODE','FLOORSMIN_MODE','LANDAREA_MODE','LIVINGAPARTMENTS_MODE','LIVINGAREA_MODE','NONLIVINGAPARTMENTS_MODE','NONLIVINGAREA_MODE','APARTMENTS_MEDI','BASEMENTAREA_MEDI','YEARS_BEGINEXPLUATATION_MEDI','YEARS_BUILD_MEDI','COMMONAREA_MEDI','ELEVATORS_MEDI','ENTRANCES_MEDI','FLOORSMAX_MEDI','FLOORSMIN_MEDI','LANDAREA_MEDI','LIVINGAPARTMENTS_MEDI','LIVINGAREA_MEDI','NONLIVINGAPARTMENTS_MEDI','NONLIVINGAREA_MEDI','TOTALAREA_MODE')]
+
+
+#install.packages("corrplot")
+library(corrplot)
+
+cors <- cor(house[complete.cases(house), ])
+corrplot(cors, type = "upper", order = "hclust", 
+         tl.col = "black", tl.cex = 0.5, tl.srt = 45)
+
+```
+
+Each set of _Avg, _MEDI, and _MODE housing variables shows close to 100% correlation.  Keep the _MEDI ones to simplify.
+
+#### Drop redundant housing numerics:
+
+```{r}
+drops <- c('APARTMENTS_AVG','BASEMENTAREA_AVG','YEARS_BEGINEXPLUATATION_AVG','YEARS_BUILD_AVG','COMMONAREA_AVG','ELEVATORS_AVG','ENTRANCES_AVG','FLOORSMAX_AVG','FLOORSMIN_AVG','LANDAREA_AVG','LIVINGAPARTMENTS_AVG','LIVINGAREA_AVG','NONLIVINGAPARTMENTS_AVG','NONLIVINGAREA_AVG','APARTMENTS_MODE','BASEMENTAREA_MODE','YEARS_BEGINEXPLUATATION_MODE','YEARS_BUILD_MODE','COMMONAREA_MODE','ELEVATORS_MODE','ENTRANCES_MODE','FLOORSMAX_MODE','FLOORSMIN_MODE','LANDAREA_MODE','LIVINGAPARTMENTS_MODE','LIVINGAREA_MODE','NONLIVINGAPARTMENTS_MODE','NONLIVINGAREA_MODE')
+
+train.X <- train.X[, !names(train.X) %in% drops]
+```
+
+#### Impute Missing Numeric variables:
+
+``` {r}
+# First do some formatting on the remaining data to get integers, factors and numerics where they make sense:
+class.values <- sapply(train.X, class)
+ints <- as.vector(class.values == "integer")
+nums <- as.vector(class.values == "numeric")
+chars <- as.vector(class.values == "character")
+
+
+#convert characters to factors:
+for (i in (1:ncol(train.X)) ) {
+  if (class(train.X[, i]) == "character") {
+    train.X[, i] <- as.factor(train.X[, i])
+  }
+}
+
+# reassign class values:
+class.values <- sapply(train.X, class)
+facs <- chars
+```
+
+
+
+```{r}
+#install.packages("mice")
+library(mice)
+
+#md.pattern(train.X)
+train.X.imputed <- mice(train.X[, nums], m=5, maxit = 50, method = 'pmm', seed = 500)
+
+names(train.X[, nums])
+
+
+```
+
+
+```{r}
+# separate classes within the dataframe:
+class.values <- sapply(train.X, class)
+ints <- as.vector(class.values == "integer")
+nums <- as.vector(class.values == "numeric")
+chars <- as.vector(class.values == "character")
+
+```
+
+```{r}
+sapply(train.X[, c(ints)], n_unique)
+```
+
+```{r}
+# cast selected columns as numerics:
+train.X$DAYS_BIRTH <- as.numeric(train.X$DAYS_BIRTH)
+train.X$DAYS_EMPLOYED <- as.numeric(train.X$DAYS_EMPLOYED)
+train.X$DAYS_ID_PUBLISH <- as.numeric(train.X$DAYS_ID_PUBLISH)
+```
+
+```{r}
+# update class value assignments:
+class.values <- sapply(train.X, class)
+```
+
+
+## Define plotting functions to look at individual variables:
+```{r}
+# core plotting for numeric data:
+one_plot <- function(d, colname) {
+  plot_ly(d, x = d[, colname], type="histogram") %>%
+    add_annotations(
+      ~unique(TARGET), x = 0.5, y = 1, 
+      xref = "paper", yref = "paper", showarrow = FALSE
+    )
+}
+```
+
+```{r}
+# wrapper to call one_plot
+plot.numeric <- function(data, colname) {
+  #defines x axis
+  x.axis <- list(
+    title = colname,
+    titlefont = list(
+      family = "Courier New, monospace",
+      size = 18,
+      color = "#7f7f7f")
+  )
+  
+  # split dataset by target values and call one_plot
+  plt <- data %>%
+    split(.$TARGET) %>%
+    lapply(one_plot, colname=colname) %>% 
+    subplot(nrows = 2, shareX = TRUE, titleX = TRUE) %>%
+    layout(xaxis = x.axis) %>%
+    hide_legend()
+
+  plt
+}
+
+```
+
+
+```{r}
+# plot proportion of total dataset:
+plot.cat.1 <- function(data, colname) {
+  data %>%
+    mutate(TARGET=as.factor(TARGET)) %>%
+    count(UQ(as.name(colname)), TARGET) %>%
+    mutate(proportion = n / nrow(data)) %>%
+    plot_ly(x = unique(select(data, colname)), y = ~proportion, color = ~TARGET, type="bar") %>%
+     layout(barmode = "stack", 
+            title = colname)
+  
+}
+```
+
+```{r}
+plot.cat.2 <- function(data, colname) {
+  data$TARGET = as.factor(data$TARGET)
+  ct = count(data, UQ(as.name(colname)), TARGET)
+  ct.2 <- left_join(ct, count(ct, UQ(as.name(colname)), wt = n))
+  ct.2 %>%
+    mutate(prop = n / nn) %>%
+    plot_ly(x = unique(select(data, colname)), y = ~prop, color = ~TARGET) %>%
+    add_bars() %>%
+    layout(barmode = "stack", 
+           title = colname)
+}
+```
+
+```{r}
+# Loop through columns and make plots:
+train.X$TARGET <- y
+
+for (i in 1:length(class.values)) {
+  obj = class.values[i]
+  cn = names(obj)
+  cv = obj[[1]]
+  # PDF setup:
+  plotname = paste(cn, "_plot.pdf", sep="")
+  if (cv == "numeric") {
+    plt = plot.numeric(train.X, cn)
+    print(plt)
+  } else {
+    cat.plt.1 <- plot.cat.1(train.X, cn)
+    print(cat.plt.1)
+    cat.plt.2 <- plot.cat.2(train.X, cn)
+    print(cat.plt.2)
+  }
+}
+```
+
+From looking at the kable() output above, there are numerous features with lots of NA values.  Check the proportion of NAs in the data, remove those with > 30% NA for now.
+
+```{r}
+missing.pcts <- numeric(ncol(train.X))
+n <- nrow(train.X)
+
+for (i in 1:length(missing.pcts)) {
+  col.values = train.X[, i]
+  null.count = sum(is.na(col.values))
+  null.pct <- null.count / n
+  missing.pcts[i] = null.pct
+}
+
+# columns to get rid of due to missing data - TODO: optimize setting
+drops <- names(train.X)[missing.pcts > .30]
+
+train.X.filt = train.X[ , !(names(train.X) %in% drops)]
+#rm(dt.copy.X) # get rid of this; can always get it back later if necessary
+
+```
+
+There are a large number of missing values in the statistics describing the type of housing sought by the applicant.  Dig into this set of variables to determine their relationship to one another and to the target.
+
+```{r}
+
+#paste0(names(train.X), collapse="','")
+house <- train.X[,c('APARTMENTS_AVG','BASEMENTAREA_AVG','YEARS_BEGINEXPLUATATION_AVG','YEARS_BUILD_AVG','COMMONAREA_AVG','ELEVATORS_AVG','ENTRANCES_AVG','FLOORSMAX_AVG','FLOORSMIN_AVG','LANDAREA_AVG','LIVINGAPARTMENTS_AVG','LIVINGAREA_AVG','NONLIVINGAPARTMENTS_AVG','NONLIVINGAREA_AVG','APARTMENTS_MODE','BASEMENTAREA_MODE','YEARS_BEGINEXPLUATATION_MODE','YEARS_BUILD_MODE','COMMONAREA_MODE','ELEVATORS_MODE','ENTRANCES_MODE','FLOORSMAX_MODE','FLOORSMIN_MODE','LANDAREA_MODE','LIVINGAPARTMENTS_MODE','LIVINGAREA_MODE','NONLIVINGAPARTMENTS_MODE','NONLIVINGAREA_MODE','APARTMENTS_MEDI','BASEMENTAREA_MEDI','YEARS_BEGINEXPLUATATION_MEDI','YEARS_BUILD_MEDI','COMMONAREA_MEDI','ELEVATORS_MEDI','ENTRANCES_MEDI','FLOORSMAX_MEDI','FLOORSMIN_MEDI','LANDAREA_MEDI','LIVINGAPARTMENTS_MEDI','LIVINGAREA_MEDI','NONLIVINGAPARTMENTS_MEDI','NONLIVINGAREA_MEDI','TOTALAREA_MODE')]
+
+# categorical housing type columns with lots of missing values:
+# HOUSETYPE_MODE, WALLSMATERIAL_MODE, EMERGENCYSTATE_MODE, FONDKAPREMONT_MODE
+```
+
+### Adjust for any non-NA outliers:
+```{r}
+
+for (n in names(house)) {
+  x <- house[, n]
+  qnt <- quantile(x, probs=c(.25, .75), na.rm = T)
+  caps <- quantile(x, probs=c(.05, .95), na.rm = T)
+  H <- 1.5 * IQR(x, na.rm = T)
+  x[x < (qnt[1] - H)] <- caps[1]
+  x[x > (qnt[2] + H)] <- caps[2]
+  house[, n] <- x
+}
+
+```
+
+
+```{r}
+library(corrplot)
+cors <- cor(house[complete.cases(house), ])
+corrplot(cors, type = "upper", order = "hclust", 
+         tl.col = "black", tl.cex = 0.5, tl.srt = 45)
+```
+
+Each set of the housing variables shows high correlations among its component variables, which isn't a huge surprise.  There are also high correlations between several of the component sets.  Do some basic exploration to determine how related these are to the output variable before looking at techniques to keep this information.
+
+```{r}
+
+house.comp <- house[complete.cases(house), ]
+house.comp$TARGET <- y[complete.cases(house)]
+house.comp.f <- house.comp[, c(29:43)]
+names(house.comp.f)
+
+house.comp.f$TARGET <- house.comp$TARGET
+mod <- glm(TARGET ~ .,family=binomial(link='logit'), data=house.comp.f)
+
+summary(mod)
+anova(mod, test="Chisq")
+```
+
+From this information, it appears that there's a positive relationship between variables related to the size and age of the building and the target, with larger buildings predictive of higher default rates.  But, it's difficult to determine their ultimate value because of the high correlations among the input variables. From running the above with the _AVG, _MODE, and _MEDI variables separately, the same types of information seem to matter.  Using the _MEDI set in PCA.
+
+```{r}
+#house.comp.f.log <- data.frame(apply(house.comp.f, MARGIN=2, FUN=log))
+#house.sc <- scale(house.comp.f, scale=TRUE)
+
+#house.comp.f <- house.comp.f[, -16]
+house.comp.f.pc <- princomp(house.comp.f)
+plot(house.comp.f.pc)
+summary(house.comp.f.pc)
+
+```
+
+
+Based on the above, take the first eight PCs for housing variables.
+
+```{r}
+
+house.comp.f.pc$loadings
+
+```
+
+
+
+### Some more data formatting:
+```{r}
+class.values <- sapply(train.X.filt, class)
+ints <- class.values == "integer"
+nums <- class.values == "numeric"
+char <- class.values == "character"
+
+#sapply(train.X.filt[, ints], n_unique)
+# cast features to numeric where appropriate:
+
+train.X.filt$CNT_CHILDREN <- as.numeric(train.X.filt$CNT_CHILDREN)
+train.X.filt$HOUR_APPR_PROCESS_START <- as.numeric(train.X.filt$HOUR_APPR_PROCESS_START)
+
+# reformat characters and remaining integer columns to factors:
+train.X.filt <- train.X.filt %>% mutate_if(is.character, as.factor)
+train.X.filt <- train.X.filt %>% mutate_if(is.integer, as.factor)
+
+class.values <- sapply(train.X.filt, class)
+facs <- class.values == "factor"
+nums <- class.values == "numeric"
+
+```
+
+
+Now that we have a dataset with a reasonable proportion of missing values, fill in the NA's with the median (numerics) or mode (categoricals).
+
+```{r}
+library(Hmisc)
+
+for (i in 1:length(class.values)) {
+  obj = class.values[i]
+  cn = names(obj)
+  cv = obj[[1]]
+  if (cv == "numeric") {
+    train.X.filt[, i] <- as.numeric(impute(train.X.filt[, i], median))
+  } else {
+    train.X.filt[, i] <- as.factor(impute(train.X.filt[, i], mode))
+  }
+}
+
+```
+
+
+### There are also values on a negative scale in this dataset.
+These come from the set of columns defining days between certain actions *before* the application. That being the case, it seems reasonable to set any negative values to 0, since those would represent actions occuring *after* the application.  DAYS_BIRTH is different, and its values should be negated since they're all negative. 
+
+DAYS_EMPLOYED is another interesting case. The majority of its values are below zero, representing the number of days before the application that the applicant started their current job. A significant portion of the values for this feature, however, have a value of 365243. My interpretation of those observations is that they represent people who started their current job AFTER the application, or who are currently unemployed.  We want to know the likelihood that someone will default based on the information available at the time the application was created, so set these values to the median observed among the valid (i.e. negative) observations.
+
+```{r}
+
+# update DAYS_ features that are on negative scale:
+train.X.filt$DAYS_BIRTH <- -train.X.filt$DAYS_BIRTH
+train.X.filt$DAYS_ID_PUBLISH <- -train.X.filt$DAYS_ID_PUBLISH
+train.X.filt$DAYS_REGISTRATION <- -train.X.filt$DAYS_REGISTRATION
+train.X.filt$DAYS_LAST_PHONE_CHANGE <- -train.X.filt$DAYS_LAST_PHONE_CHANGE
+
+# update DAYS_EMPLOYED differently
+f <- train.X.filt$DAYS_EMPLOYED < 0
+#hist(train.X.filt[f, c("DAYS_EMPLOYED")])
+#max(train.X.filt[f, c("DAYS_EMPLOYED")])
+days.emp.med <- median(train.X.filt[f, c("DAYS_EMPLOYED")])
+
+train.X.filt[train.X.filt$DAYS_EMPLOYED > 0, c("DAYS_EMPLOYED")] <- days.emp.med
+train.X.filt$DAYS_EMPLOYED <- -train.X.filt$DAYS_EMPLOYED
+
+```
+
+
+### Look at correlation matrix on numeric input variables
+```{r}
+#install.packages("corrplot")
+library(corrplot)
+
+cors <- cor(train.X.filt[, nums])
+corrplot(cors, type = "upper", order = "hclust", 
+         tl.col = "black", tl.cex = 0.5, tl.srt = 45)
+
+```
+
+Some of the numerics are redundant. List below:
+- CNT_CHILDREN <--> CNT_FAMILY_MEMBERS: Keep total family members
+- OBS_30_CNT_SOCIAL_CIRCLE <--> OBS_60_CNT_SOCIAL_CIRCLE: Keep 60
+- DEF_30_CNT_SOCIAL_CIRCLE <--> OBS_60_CNT_SOCIAL_CIRCLE: Keep 60
+- AMT_ANNUITY <-- > AMT_CREDIT: Keep AMT_CREDIT
+- AMT_CREDIT <--> AMT_GOODS_PRICE: Keep AMT_CREDIT
+
+
+### Remove redundant columns as described above:
+```{r}
+train.X.filt <- train.X.filt[, !names(train.X.filt) %in% c("CNT_CHILDREN", "OBS_30_CNT_SOCIAL_CIRCLE", "DEF_30_CNT_SOCIAL_CIRCLE", "AMT_ANNUITY", "AMT_GOODS_PRICE")]
+
+```
+
+
+### Look at mutual information gain for feature selection:
+
+```{r}
+#install.packages("infotheo")
+library(infotheo)
+
+train.X.filt <- train.X.filt[, -c(1,2)]
+class.values <- sapply(train.X.filt, class) # update class.values
+facs <- as.vector(class.values == "integer")
+nums <- as.vector(class.values == "numeric")
+
+n.facs <- sum(facs)
+ig.vals <- numeric(n.facs)
+fac.col.names <- character(n.facs)
+
+insert.idx = 1
+for (i in 1:length(class.values)) {
+  
+  obj = class.values[i]
+  cn = names(obj)
+  cv = obj[[1]]
+  # identify numerics and find their log
+  if (cv != "numeric") {
+    mi = mutinformation(y, train.X.filt[, i])
+    ig.vals[insert.idx] = mi
+    fac.col.names[insert.idx] = cn
+    insert.idx = insert.idx + 1
+  }
+}
+
+ig.sort <- sort(ig.vals, decreasing = TRUE, index.return = TRUE)
+#cat.col.names[ig.sort$ix]
+
+# very few features carry information on the output. Drop the others
+hist(ig.sort$x, breaks=25)
+
+
+# which columns carry information:
+fac.keep <- fac.col.names[ig.sort$ix[ig.sort$x > .0001]]
+```
+
+```{r}
+#install.packages("randomForest")
+library(randomForest)
+train.X.filt$TARGET <- as.factor(y)
+set.seed(1234)
+
+# randomForest can't handle categoricals with more than 53 levels:
+class.values <- sapply(train.X.filt, class)
+unique(class.values)
+facs <- as.vector(class.values == "factor")
+non.nums <- class.values != "numeric"
+
+# ORGANIZATION TYPE column has many levels.  Collapse them based on the outer type:
+sapply(train.X.filt[, non.nums], n_unique)
+table(train.X.filt$ORGANIZATION_TYPE)
+
+library(forcats)
+train.X.filt$ORGANIZATION_TYPE <- fct_collapse(train.X.filt$ORGANIZATION_TYPE,                                                 Advertising = "Advertising",
+                                              Agriculture = "Agriculture",
+                                              Bank = "Bank",
+                                              Business_Entity = c("Business Entity Type 1", "Business Entity Type 2", "Business Entity Type 3"), 
+                                              Cleaning = "Cleaning",
+                                              Construction = "Construction",
+                                              Culture = "Culture",
+                                              Electriciy = "Electricity",
+                                              Emergency = "Emergency",
+                                              Government = "Government",
+                                              Hotel = "Hotel",
+                                              Housing = "Housing",
+                                              Industry = c("Industry: type 1",
+                                                           "Industry: type 2",
+                                                           "Industry: type 3",
+                                                           "Industry: type 4",
+                                                           "Industry: type 5",
+                                                           "Industry: type 6",
+                                                           "Industry: type 7",
+                                                           "Industry: type 8",
+                                                           "Industry: type 9",
+                                                           "Industry: type 10",
+                                                           "Industry: type 11",
+                                                           "Industry: type 12",
+                                                           "Industry: type 13"),
+                                              Insurance = "Insurance",
+                                              Kindergarten = "Kindergarten",
+                                              Legal_Services = "Legal Services",
+                                              Medicine = "Medicine",
+                                              Military = "Military",
+                                              Mobile = "Mobile",
+                                              Other = "Other",
+                                              Police = "Police",
+                                              Postal = "Postal",
+                                              Realtor = "Realtor",
+                                              Religion = "Religion",
+                                              Restaurant = "Restaurant",
+                                              School = "School",
+                                              Security = c("Security", "Security Ministries"),
+                                              Self_Employed = "Self-employed",
+                                              Services = "Services",
+                                              Telecom = "Telecom",
+                                              Trade = c("Trade: type 1",
+                                                        "Trade: type 2",
+                                                        "Trade: type 3",
+                                                        "Trade: type 4",
+                                                        "Trade: type 5",
+                                                        "Trade: type 6",
+                                                        "Trade: type 7"),
+                                              Transport = c("Transport: type 1",
+                                                            "Transport: type 2",
+                                                            "Transport: type 3",
+                                                            "Transport: type 4"),
+                                              University = "University",
+                                              XNA = "XNA")
+
+table(train.X.filt$ORGANIZATION_TYPE)
+
+
+# build random forest
+train.rf <- randomForest(TARGET ~ ., data=train.X.filt, ntree=25,
+                          keep.forest=TRUE, importance=TRUE)
+
+# try rfcv for feature selection
+?importance
+importance(train.rf, type=2) # decrease in gini impurity
+importance(train.rf, type=1) # decrease in prediction accuracy
+
+?varImpPlot
+varImpPlot(train.rf, n.var=30)
+
+#notes:
+
+# average the Ext source values together
+
+
+```
+
+### Check prediction accuracy on the training data:
+```{r}
+
+
+train.X.filt.p <- train.X.filt[, -66] # drop target variable
+y.pred <- predict(train.rf, train.X.filt.p)
+```
+
+
+```{r}
+table(y.pred == y)
+```
+
