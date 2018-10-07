@@ -1,0 +1,42 @@
+---
+title: "Google Customer Revenue Prediction - Data Exploration"
+output: html_notebook
+---
+
+
+```{r, include=FALSE}
+require(dplyr)
+require(data.table)
+library(jsonlite)
+```
+
+
+```{r}
+set.seed(1234)
+train <- read.csv("./data/train.csv", sep=",")
+test <- read.csv("./data/test.csv", sep=",")
+sapply(train, class)
+```
+
+### Parse the json in the totals column into its separate fields
+```{r}
+cat('Defining helpers')
+
+flatten_json <- . %>% 
+  str_c(., collapse = ",") %>% # put all items in list and convert to string
+  str_c("[", ., "]") %>%  # wrap the string with brackets to create valid json
+  fromJSON(flatten = T) # split fields contained in json into separate columns
+
+parse <- . %>% 
+  bind_cols(flatten_json(.$device)) %>%
+  bind_cols(flatten_json(.$geoNetwork)) %>% 
+  bind_cols(flatten_json(.$trafficSource)) %>% 
+  bind_cols(flatten_json(.$totals)) %>% 
+  select(-device, -geoNetwork, -trafficSource, -totals)
+```
+
+
+```{r}
+train <- parse(train)
+test <- parse(test)
+```
